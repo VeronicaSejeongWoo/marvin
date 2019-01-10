@@ -1,4 +1,5 @@
 #include <Servo.h>
+#include <SoftwareSerial.h>
 
 #define REG_MAX 1023
 #define REG_MAX1 734
@@ -25,6 +26,9 @@ ServoData servoData01;
 
 int controlState;
 int count;
+
+SoftwareSerial mySerial(9, 10); // TX, RX
+String command = "";
 
 void SetServoControl(Servo *servo, int position)
 {
@@ -70,6 +74,7 @@ void pciSetup(byte pin)
   PCICR |= bit (digitalPinToPCICRbit(pin)); // enable interrupt for the group
 }
 
+/*
 ISR (PCINT2_vect)
 {
   if(digitalRead(2) == 1)
@@ -92,12 +97,14 @@ ISR (PCINT2_vect)
     controlState = STATE_PLAY;  
     Serial.println("Play");
   }
-}
+} */
 
 int pos;
 
 void setup() {
   // put your setup code here, to run once: 
+  mySerial.begin(9600);
+  
   pinMode(2, INPUT);
   pinMode(3, INPUT);
   pinMode(4, INPUT);
@@ -106,9 +113,9 @@ void setup() {
   pinMode(7, OUTPUT);
   digitalWrite(7, LOW);
 
-  pciSetup(2);
-  pciSetup(3);
-  pciSetup(4);
+  //pciSetup(2);
+  //pciSetup(3);
+  //pciSetup(4);
   
   Serial.begin(9600); 
   servo01.attach(6);
@@ -126,6 +133,51 @@ void setup() {
 }
 
 void loop() {
+  if(mySerial.available()) {
+    while(mySerial.available()) {
+      command += (char)mySerial.read();
+      controlState = command.toInt();
+
+      if(controlState == STATE_STOP)
+      {
+        digitalWrite(7, LOW);
+        Serial.println("Stop");
+      }
+      else if(controlState == STATE_RECORD)
+      {
+        digitalWrite(7, LOW);
+        Serial.println("Record");
+      }
+      else
+      {
+        digitalWrite(7, HIGH);
+        Serial.println("Play");
+      }
+    }
+    
+    Serial.println(command);
+    command = ""; // No repeats
+  }
+
+  if(digitalRead(2) == 1)
+  {
+    controlState = STATE_STOP;  
+    digitalWrite(7, LOW);
+    Serial.println("Button STOP");
+  }
+  else if(digitalRead(3) == 1)
+  {
+    controlState = STATE_RECORD;
+    digitalWrite(7, LOW); 
+    Serial.println("Button Record");
+  }
+  else if(digitalRead(4) == 1)
+  {
+    controlState = STATE_PLAY;
+    digitalWrite(7, HIGH);
+    Serial.println("Button Play");
+  }
+  
   int tempValue;
   // put your main code here, to run repeatedly:
   
