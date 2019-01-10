@@ -132,8 +132,9 @@ void setup() {
   Serial.println("RobotArm Started!");
 }
 
-void loop() {
-  if(mySerial.available()) {
+void ProcessKeyAndBTInput()
+{
+   if(mySerial.available()) {
     while(mySerial.available()) {
       command += (char)mySerial.read();
       controlState = command.toInt();
@@ -177,6 +178,10 @@ void loop() {
     digitalWrite(7, HIGH);
     Serial.println("Button Play");
   }
+}
+
+void loop() {
+  ProcessKeyAndBTInput(); 
   
   int tempValue;
   // put your main code here, to run repeatedly:
