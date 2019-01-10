@@ -5,7 +5,7 @@
 
 #define POS_MAX 180
 
-#define ARM_REG_CHANNEL1 3
+#define ARM_REG_CHANNEL1 8
 
 typedef struct
 {
@@ -51,7 +51,7 @@ void UpdateCount(int savedCount)
   
   if(controlState == STATE_RECORD)
   {
-    count = min(count, 100);
+    count = min(count, 180);
     savedCount = count;
   }
   else if(controlState ==  STATE_PLAY)
@@ -84,9 +84,6 @@ ISR (PCINT2_vect)
     digitalWrite(7, LOW);
     controlState = STATE_RECORD;
     Serial.println("Record");
-//    digitalWrite(7, HIGH);
-//    controlState = STATE_PLAY;  
-//    Serial.println("Play");
   }
 
   if(digitalRead(4) == 1)
@@ -120,7 +117,7 @@ void setup() {
   servoData01.count = 180;
   for(int i=0; i<180; i++)
   {
-    servoData01.posArm[i] = i;
+    servoData01.posArm[i] = 0;
   }
 
   count = 0;
@@ -135,9 +132,9 @@ void loop() {
   switch(controlState)
   {
     case STATE_STOP:
-//    tempValue = analogRead(3);
-//    Serial.println(tempValue);
-//    delay(500);
+    tempValue = analogRead(ARM_REG_CHANNEL1);
+    Serial.println(tempValue);
+    delay(500);
     break;
 
     case STATE_RECORD:
