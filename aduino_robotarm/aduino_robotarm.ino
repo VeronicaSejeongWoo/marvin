@@ -149,10 +149,14 @@ void ProcessKeyAndBTInput()
         digitalWrite(7, LOW);
         Serial.println("Record");
       }
-      else
+      else if(controlState == STATE_PLAY)
       {
         digitalWrite(7, HIGH);
         Serial.println("Play");
+      }
+      else
+      {
+        Serial.println("Unknown command");
       }
     }
     
