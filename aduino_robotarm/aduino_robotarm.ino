@@ -1,16 +1,26 @@
 #include <Servo.h>
 
 #define REG_MAX 1023
-#define REG_MAX1 734
+#define REG_MAX1 1000
+#define REG_MAX2 590
 
 #define POS_MAX 180
+#define POS_DATA_MAX 100
 
-#define ARM_REG_CHANNEL1 8
+#define ARM_REG_CHANNEL0 5
+#define ARM_REG_CHANNEL1 4
+#define ARM_REG_CHANNEL2 3
 
 typedef struct
 {
-  int count;
-  int posArm[180];
+  int min;
+  int max;
+}valueRange;
+
+typedef struct
+{
+  int id;
+  int posArm[POS_DATA_MAX];
 }ServoData;
 
 enum
@@ -20,11 +30,27 @@ enum
   STATE_PLAY
 };
 
-Servo servo01;
-ServoData servoData01;
+const valueRange mappingTable[] = 
+{
+  {998, 14},
+  {590, 0},
+  {190, 920},
+};
+
+Servo servo0;
+ServoData servoData0;
+Servo servo1;
+ServoData servoData1;
+Servo servo2;
+ServoData servoData2;
 
 int controlState;
 int count;
+int savedCount;
+
+volatile int stopKeyPressed;
+volatile int recordKeyPressed;
+volatile int playKeyPressed;
 
 void SetServoControl(Servo *servo, int position)
 {
@@ -33,25 +59,25 @@ void SetServoControl(Servo *servo, int position)
   Serial.println(position);
 }
 
-int GetArmPosition(int regInput)
+int GetArmPosition(int regInput, int id)
 {
-  int armPosition = map(regInput, 0, REG_MAX1, 0, POS_MAX);
+  int armPosition = map(regInput, mappingTable[id].min, mappingTable[id].max, 20, POS_MAX-20);
   return armPosition;
 }
 
 void SaveArmPosition(ServoData *data, int channel, int count)
 {
   int regValue = analogRead(channel);
-  data->posArm[count] = GetArmPosition(regValue);
+  data->posArm[count] = GetArmPosition(regValue, data->id);
 }
 
-void UpdateCount(int savedCount)
+void UpdateCount()
 {
   count++;
   
   if(controlState == STATE_RECORD)
   {
-    count = min(count, 180);
+    count = min(count, POS_DATA_MAX);
     savedCount = count;
   }
   else if(controlState ==  STATE_PLAY)
@@ -74,27 +100,19 @@ ISR (PCINT2_vect)
 {
   if(digitalRead(2) == 1)
   {
-    digitalWrite(7, LOW);
-    controlState = STATE_STOP;
-    Serial.println("Stop");
+    stopKeyPressed = 1;
   }
 
   if(digitalRead(3) == 1)
   {
-    digitalWrite(7, LOW);
-    controlState = STATE_RECORD;
-    Serial.println("Record");
+    playKeyPressed = 1;
   }
 
   if(digitalRead(4) == 1)
   {
-    digitalWrite(7, HIGH);
-    controlState = STATE_PLAY;  
-    Serial.println("Play");
+    recordKeyPressed = 1;
   }
 }
-
-int pos;
 
 void setup() {
   // put your setup code here, to run once: 
@@ -111,42 +129,101 @@ void setup() {
   pciSetup(4);
   
   Serial.begin(9600); 
-  servo01.attach(6);
+  
+  servo0.attach(8);
+  servo1.attach(9);
+  servo2.attach(10);
   delay(20);
 
-  servoData01.count = 180;
-  for(int i=0; i<180; i++)
+  // Servo motor 0
+  servoData0.id = 0;
+  for(int i=0; i<POS_DATA_MAX; i++)
   {
-    servoData01.posArm[i] = 0;
+    servoData0.posArm[i] = 0;
   }
 
+  // Servo motor 1
+  servoData1.id = 1;
+  for(int i=0; i<POS_DATA_MAX; i++)
+  {
+    servoData1.posArm[i] = 0;
+  }
+
+  // Servo motor 2
+  servoData2.id = 2;
+  for(int i=0; i<POS_DATA_MAX; i++)
+  {
+    servoData2.posArm[i] = 0;
+  }
+  
   count = 0;
+  savedCount = 0;
   controlState = STATE_STOP;
   Serial.println("RobotArm Started!");
+}
+
+void CheckKeys()
+{
+  if(stopKeyPressed)
+  {
+    stopKeyPressed = 0;
+    digitalWrite(7, LOW);
+    controlState = STATE_STOP;
+    Serial.println("Stop");
+  }
+  else if(recordKeyPressed)
+  {
+    recordKeyPressed = 0;
+    count = 0;
+    savedCount = 0;
+    digitalWrite(7, LOW);
+    controlState = STATE_RECORD;  
+    Serial.println("Record");
+    for(int i=0; i<POS_DATA_MAX; i++)
+    {
+      servoData0.posArm[i] = 0;
+      servoData1.posArm[i] = 0;
+      servoData2.posArm[i] = 0;
+    }
+  }
+    else if(playKeyPressed)
+  {
+    playKeyPressed = 0;
+    count = 0;
+    digitalWrite(7, HIGH);
+    controlState = STATE_PLAY;  
+    Serial.println("Play");
+  }
 }
 
 void loop() {
   int tempValue;
   // put your main code here, to run repeatedly:
+
+  CheckKeys();
   
   switch(controlState)
   {
     case STATE_STOP:
-    tempValue = analogRead(ARM_REG_CHANNEL1);
-    Serial.println(tempValue);
-    delay(500);
+//    tempValue = analogRead(ARM_REG_CHANNEL1);
+//    Serial.println(tempValue);
+//    delay(500);
     break;
 
     case STATE_RECORD:
-    SaveArmPosition(&servoData01, ARM_REG_CHANNEL1, count);
-    UpdateCount(servoData01.count);
+    SaveArmPosition(&servoData0, ARM_REG_CHANNEL0, count);
+    SaveArmPosition(&servoData1, ARM_REG_CHANNEL1, count);
+    SaveArmPosition(&servoData2, ARM_REG_CHANNEL2, count);
+    UpdateCount();
     delay(200);
     break;
 
     case STATE_PLAY:
-    SetServoControl(&servo01, servoData01.posArm[count]); 
-    UpdateCount(servoData01.count);
-    delay(15);
+    SetServoControl(&servo0, servoData0.posArm[count]); 
+    SetServoControl(&servo1, servoData1.posArm[count]); 
+    SetServoControl(&servo2, servoData2.posArm[count]); 
+    UpdateCount();
+    delay(100);
     break;
     
     default:
