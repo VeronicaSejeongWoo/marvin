@@ -1,15 +1,22 @@
 #include <Servo.h>
-
-#define REG_MAX 1023
-#define REG_MAX1 1000
-#define REG_MAX2 590
+#include <SoftwareSerial.h>
 
 #define POS_MAX 180
 #define POS_DATA_MAX 100
 
-#define ARM_REG_CHANNEL0 5
+#define ARM_REG_CHANNEL0 3
 #define ARM_REG_CHANNEL1 4
-#define ARM_REG_CHANNEL2 3
+#define ARM_REG_CHANNEL2 1
+#define ARM_REG_CHANNEL_HAND 2
+
+#define ARM_SERVO_CHANNEL0 10
+#define ARM_SERVO_CHANNEL1 9
+#define ARM_SERVO_CHANNEL2 8
+#define ARM_SERVO_CHANNEL_HAND 11
+
+#define STOP_KEY_CHANNEL 2
+#define RECORD_KEY_CHANNEL 3
+#define PLAY_KEY_CHANNEL 4
 
 typedef struct
 {
@@ -32,9 +39,10 @@ enum
 
 const valueRange mappingTable[] = 
 {
-  {998, 14},
-  {590, 0},
   {190, 920},
+  {590, 0}, 
+  {998, 14},
+  {300, 0}
 };
 
 Servo servo0;
@@ -43,25 +51,29 @@ Servo servo1;
 ServoData servoData1;
 Servo servo2;
 ServoData servoData2;
+Servo servoHand;
+ServoData servoDataHand;
 
 int controlState;
+int requestedState;
 int count;
 int savedCount;
 
-volatile int stopKeyPressed;
-volatile int recordKeyPressed;
-volatile int playKeyPressed;
+SoftwareSerial mySerial(12, 13); // TX, RX
+String command = "";
 
 void SetServoControl(Servo *servo, int position)
 {
   position = min(position, POS_MAX);
+  position = max(position, 0);
   servo->write(position);
-  Serial.println(position);
 }
 
 int GetArmPosition(int regInput, int id)
 {
-  int armPosition = map(regInput, mappingTable[id].min, mappingTable[id].max, 20, POS_MAX-20);
+  int armPosition = map(regInput, mappingTable[id].min, mappingTable[id].max, 10, POS_MAX-10);
+  armPosition = min(armPosition, POS_MAX);
+  armPosition = max(armPosition, 0);
   return armPosition;
 }
 
@@ -96,26 +108,11 @@ void pciSetup(byte pin)
   PCICR |= bit (digitalPinToPCICRbit(pin)); // enable interrupt for the group
 }
 
-ISR (PCINT2_vect)
-{
-  if(digitalRead(2) == 1)
-  {
-    stopKeyPressed = 1;
-  }
-
-  if(digitalRead(3) == 1)
-  {
-    playKeyPressed = 1;
-  }
-
-  if(digitalRead(4) == 1)
-  {
-    recordKeyPressed = 1;
-  }
-}
-
 void setup() {
   // put your setup code here, to run once: 
+  mySerial.begin(9600);
+
+  // Ley input
   pinMode(2, INPUT);
   pinMode(3, INPUT);
   pinMode(4, INPUT);
@@ -124,104 +121,121 @@ void setup() {
   pinMode(7, OUTPUT);
   digitalWrite(7, LOW);
 
-  pciSetup(2);
-  pciSetup(3);
-  pciSetup(4);
-  
   Serial.begin(9600); 
   
-  servo0.attach(8);
-  servo1.attach(9);
-  servo2.attach(10);
+  servo0.attach(ARM_SERVO_CHANNEL0);
+  servo1.attach(ARM_SERVO_CHANNEL1);
+  servo2.attach(ARM_SERVO_CHANNEL2);
+  servoHand.attach(ARM_SERVO_CHANNEL_HAND);
   delay(20);
 
-  // Servo motor 0
+  // Initialize Servo motorS
   servoData0.id = 0;
-  for(int i=0; i<POS_DATA_MAX; i++)
-  {
-    servoData0.posArm[i] = 0;
-  }
-
-  // Servo motor 1
   servoData1.id = 1;
-  for(int i=0; i<POS_DATA_MAX; i++)
-  {
-    servoData1.posArm[i] = 0;
-  }
-
-  // Servo motor 2
   servoData2.id = 2;
+  servoDataHand.id = 3;
+  
   for(int i=0; i<POS_DATA_MAX; i++)
   {
-    servoData2.posArm[i] = 0;
+    servoData0.posArm[i] = 90;
+    servoData1.posArm[i] = 90;
+    servoData2.posArm[i] = 90;
+    servoDataHand.posArm[i] = 90;
   }
   
   count = 0;
   savedCount = 0;
   controlState = STATE_STOP;
+  requestedState = STATE_STOP;
   Serial.println("RobotArm Started!");
 }
 
-void CheckKeys()
+void CheckStates()
 {
-  if(stopKeyPressed)
+  if((requestedState == STATE_STOP) && (controlState != STATE_STOP))
   {
-    stopKeyPressed = 0;
-    digitalWrite(7, LOW);
     controlState = STATE_STOP;
+    digitalWrite(7, LOW);
     Serial.println("Stop");
   }
-  else if(recordKeyPressed)
+  else if((requestedState == STATE_RECORD) && (controlState != STATE_RECORD))
   {
-    recordKeyPressed = 0;
+    controlState = STATE_RECORD;
     count = 0;
     savedCount = 0;
     digitalWrite(7, LOW);
-    controlState = STATE_RECORD;  
-    Serial.println("Record");
     for(int i=0; i<POS_DATA_MAX; i++)
     {
       servoData0.posArm[i] = 0;
       servoData1.posArm[i] = 0;
       servoData2.posArm[i] = 0;
     }
+    Serial.println("Record");
   }
-    else if(playKeyPressed)
+  else if((requestedState == STATE_PLAY) && (controlState != STATE_PLAY))
   {
-    playKeyPressed = 0;
+    controlState = STATE_PLAY;  
     count = 0;
     digitalWrite(7, HIGH);
-    controlState = STATE_PLAY;  
     Serial.println("Play");
   }
 }
 
-void loop() {
-  int tempValue;
-  // put your main code here, to run repeatedly:
+void CheckKeys()
+{
+  if(digitalRead(STOP_KEY_CHANNEL) == 1)
+  {
+    requestedState = STATE_STOP;
+  }
+  else if(digitalRead(RECORD_KEY_CHANNEL) == 1)
+  {
+    requestedState = STATE_RECORD;
+  }
+  else if(digitalRead(PLAY_KEY_CHANNEL) == 1)
+  {
+    requestedState = STATE_PLAY;
+  }
+}
 
+void ProcessBTInput()
+{
+   if(mySerial.available()) {
+    while(mySerial.available()) {
+      command += (char)mySerial.read();
+      requestedState = command.toInt();
+    }
+    
+    Serial.println(command);
+    command = ""; // No repeats
+  }
+}
+
+int temp;
+void loop() {
+  // put your main code here, to run repeatedly:
+  ProcessBTInput(); 
   CheckKeys();
+  CheckStates();
   
   switch(controlState)
   {
     case STATE_STOP:
-//    tempValue = analogRead(ARM_REG_CHANNEL1);
-//    Serial.println(tempValue);
-//    delay(500);
     break;
 
     case STATE_RECORD:
     SaveArmPosition(&servoData0, ARM_REG_CHANNEL0, count);
     SaveArmPosition(&servoData1, ARM_REG_CHANNEL1, count);
-    SaveArmPosition(&servoData2, ARM_REG_CHANNEL2, count);
+//    SaveArmPosition(&servoData2, ARM_REG_CHANNEL2, count);
+    SaveArmPosition(&servoDataHand, ARM_REG_CHANNEL_HAND, count);
     UpdateCount();
-    delay(200);
+    delay(100);
     break;
 
     case STATE_PLAY:
     SetServoControl(&servo0, servoData0.posArm[count]); 
     SetServoControl(&servo1, servoData1.posArm[count]); 
-    SetServoControl(&servo2, servoData2.posArm[count]); 
+//    SetServoControl(&servo2, servoData2.posArm[count]); 
+    SetServoControl(&servoHand, servoDataHand.posArm[count]); 
     UpdateCount();
     delay(100);
     break;
